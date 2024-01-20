@@ -1,55 +1,71 @@
-from pyteal import *
+import beaker
+from beaker.decorators import Authorize
+# from beaker.application import initialize_global_state
+import sys
 from pathlib import Path
-import sys,yaml,algosdk,beaker
+import yaml
+from pyteal import *
+import algosdk
 from typing import Literal as L
 from dotenv import load_dotenv
-from beaker.decorators import Authorize
-from beaker.lib.storage import BoxMapping
 load_dotenv()
-sys.path.append(".")
 
+sys.path.append(".")
+from abi_structures import *
+from assets.helpers.key_map import key_map as protocol_key_map
 from utils.gora_pyteal_utils import (
     opt_in as gora_opt_in, 
     get_method_signature, 
     opt_in_asset
 )
-
-from utils.subroutines import verify_algo_xfer,send_algo
-from assets.helpers.key_map import key_map as protocol_key_map
-from utils.consts import GORA_CONTRACT_ID,GORA_CONTRACT_ADDRESS_BIN
-from utils.abi_structures import (BoxType,RequestParams,OracleResponse,
-                                  SourceSpec,RequestSpec,ResponseBody,
-                                  DestinationSpec
-)
+from utils.abi_types import *
 
 MLKEYMAP = protocol_key_map['main_local']
 VGKEYMAP = protocol_key_map['voting_global']
 RSKEYMAP = protocol_key_map['request_status']
 
-
+MAIN_APP_ID = Int(0)
+MAIN_APP_ADDRESS = Bytes("")
 DEMO_MODE = False
 KEY_PREFIX = Bytes("req")
-GORA_CONTRACT_ID = Int(GORA_CONTRACT_ID)
-GORA_CONTRACT_ADDRESS  = Bytes(GORA_CONTRACT_ADDRESS_BIN)
-
 
 class MyState:
     manager = beaker.GlobalStateValue(TealType.bytes)
-    oracle_response = BoxMapping(abi.DynamicBytes, OracleResponse)
-    oracle_request_params = BoxMapping(abi.DynamicBytes, RequestParams)
 
-PricePair = beaker.Application("PricePair",state=MyState(),build_options=beaker.BuildOptions(avm_version=8))
+app = beaker.Application("PricePair",state=MyState(),build_options=beaker.BuildOptions(avm_version=8))
+gora_num_response = abi.StaticBytes[L[17]]
 
+def send_algo(receiver, amount, fee_amount):
+    return Seq([
+        InnerTxnBuilder.Begin(),
+        InnerTxnBuilder.SetFields({
+            TxnField.type_enum: TxnType.Payment,
+            TxnField.receiver: receiver,
+            TxnField.amount: amount,
+            TxnField.fee: fee_amount
+        }),
+        InnerTxnBuilder.Submit()
+    ])
 
+def verify_algo_xfer(amount:abi.Uint64,algo_xfer:abi.PaymentTransaction):
+    return Assert(
+        algo_xfer.get().amount() == amount.get(),
+        algo_xfer.get().type_enum() == TxnType.Payment,
+        algo_xfer.get().receiver() == Global.current_application_address(),
+        algo_xfer.get().close_remainder_to() == Global.zero_address(),
+        algo_xfer.get().rekey_to() == Global.zero_address(),
+        algo_xfer.get().lease() == Global.zero_address()
+    )
+# TODO: do I need to make a withdraw gora function?
 
-@PricePair.create(bare=True)
+@app.create(bare=True)
 def create():
     return Seq(
-        PricePair.initialize_global_state(),
-        PricePair.state.manager.set(Global.creator_address())
+        app.initialize_global_state(),
+        app.state.manager.set(Global.creator_address())
     )
 
-@PricePair.external(authorize=Authorize.only(PricePair.state.manager.get()))
+@app.external(authorize=Authorize.only(app.state.manager.get()))
 def update_manager(
     new_manager: abi.Address
 ):
@@ -58,29 +74,29 @@ def update_manager(
             new_manager.get() != Global.zero_address(),
             Len(new_manager.get()) == Int(32)
         ),
-        PricePair.state.manager.set(new_manager.get())
+        app.state.manager.set(new_manager.get())
     )
 
-@PricePair.opt_in()
+@app.opt_in()
 def opt_in():
     return Seq(
         Reject()
     )
 
-@PricePair.update(authorize=Authorize.only(PricePair.state.manager.get()))
+@app.update(authorize=Authorize.only(app.state.manager.get()))
 def update():
     return Seq(
         Approve()
     )
 
-@PricePair.external(authorize=Authorize.only(PricePair.state.manager.get()))
+@app.external(authorize=Authorize.only(app.state.manager.get()))
 def delete():
     return Seq(
         # TODO: how decentralized do we want this initial one? Do want to be able to Delete/Update?
         Approve()
     )
 
-@PricePair.external(authorize=Authorize.only(PricePair.state.manager.get()))
+@app.external(authorize=Authorize.only(app.state.manager.get()))
 def create_price_box(
     price_pair_name: abi.DynamicBytes,
     algo_xfer: abi.PaymentTransaction
@@ -93,7 +109,7 @@ def create_price_box(
         verify_algo_xfer(contract_min_bal_cost,algo_xfer)
     )
 
-@PricePair.external(authorize=Authorize.only(PricePair.state.manager.get()))
+@app.external(authorize=Authorize.only(app.state.manager.get()))
 def delete_price_box(
     price_pair_name: abi.DynamicBytes,
 ):
@@ -105,7 +121,7 @@ def delete_price_box(
         Assert(App.box_delete(price_pair_name.get())),
         contract_min_bal_cost.set(contract_min_bal_cost.get() - MinBalance(Global.current_application_address())),
         send_algo(
-            PricePair.state.manager.get(),
+            app.state.manager.get(),
             contract_min_bal_cost.get(),
             Int(0)
         )
@@ -123,14 +139,14 @@ def verify_app_call():
             vote_app_creator,
             voting_contract_creator,
             Assert(
-                Txn.sender() != PricePair.state.manager.get(),
-                vote_app_creator.value() == GORA_CONTRACT_ADDRESS ,
+                Txn.sender() != app.state.manager.get(),
+                vote_app_creator.value() == MAIN_APP_ADDRESS,
                 vote_app_creator.value() == voting_contract_creator.value(),
                 Txn.application_id() == Global.current_application_id(),
             )
         )
 
-@PricePair.external(authorize=Authorize.only(PricePair.state.manager.get()))
+@app.external(authorize=Authorize.only(app.state.manager.get()))
 def create_request_params_box(
     price_pair_name: abi.DynamicBytes,
     token_asset_id: abi.Uint64,
@@ -150,13 +166,15 @@ def create_request_params_box(
             user_data
         ),
         Pop(App.box_delete(box_key_bytes.get())),
+        Assert(price_pair_name.get() == Substring(user_data.get(),Int(2),Len(user_data.get()))),
         (contract_min_bal_cost := abi.Uint64()).set(MinBalance(Global.current_application_address())),
+        Pop(App.box_create(box_key_bytes.get(),Len(request_params_abi.encode()))),
         contract_min_bal_cost.set(MinBalance(Global.current_application_address()) - contract_min_bal_cost.get()),
-        PricePair.state.oracle_request_params[box_key_bytes.get()].set(request_params_abi),
+        App.box_put(box_key_bytes.get(),request_params_abi.encode()),
         verify_algo_xfer(contract_min_bal_cost,algo_xfer)
     )
 
-@PricePair.external(authorize=Authorize.only(PricePair.state.manager.get()))
+@app.external(authorize=Authorize.only(app.state.manager.get()))
 def delete_request_params_box(
     price_pair_name: abi.DynamicBytes
 ):
@@ -168,14 +186,14 @@ def delete_request_params_box(
         Assert(App.box_delete(box_key_bytes.get())),
         contract_min_bal_cost.set(contract_min_bal_cost.get() - MinBalance(Global.current_application_address())),
         send_algo(
-            PricePair.state.manager.get(),
+            app.state.manager.get(),
             contract_min_bal_cost.get(),
             Int(0)
         ),
     )
 
 # TODO: ensure that only the vote contract can make the update to the prices (NOT even manager)
-@PricePair.external()
+@app.external()
 def update_price(
     response_type_bytes: abi.Uint32,
     response_body_bytes: abi.DynamicBytes,
@@ -183,16 +201,17 @@ def update_price(
     return Seq(
         verify_app_call(),
         (response_body := abi.make(ResponseBody)).decode(response_body_bytes.get()),
-        response_body.oracle_value.store_into(
-            oracle_return_value := abi.make(abi.DynamicBytes)
-        ),
-        response_body.user_data.store_into(
-            price_pair_name := abi.make(abi.DynamicBytes)
-        ),
-        PricePair.state.oracle_response[price_pair_name.get()].set(oracle_return_value.get())
+        response_body.oracle_return_value
+        .store_into(oracle_return_value := abi.make(abi.DynamicArray[abi.Byte])),
+        response_body.user_data.store_into(price_pair_name := abi.make(abi.DynamicArray[abi.Byte])),
+        (price_pair_response := abi.make(gora_num_response)).decode(Substring(oracle_return_value.encode(),Int(2),Len(oracle_return_value.encode()))),
+        price_box_bytes := App.box_get(Substring(price_pair_name.encode(),Int(4),Len(price_pair_name.encode()))),
+        Assert(price_box_bytes.hasValue()),
+        # Write price pair response to it's box
+        App.box_put(Substring(price_pair_name.encode(),Int(4),Len(price_pair_name.encode())),price_pair_response.get()),
     )
 
-@PricePair.external()
+@app.external()
 def send_request(
     price_pair_name: abi.DynamicBytes,
     key: abi.DynamicBytes
@@ -203,7 +222,7 @@ def send_request(
         Assert(sequence_box_bytes.hasValue()),
         # request_args
         (request_params := abi.make(RequestParams)).decode(sequence_box_bytes.value()),
-        Assert(GORA_CONTRACT_ID == Txn.applications[1]),
+        Assert(MAIN_APP_ID == Txn.applications[1]),
         (source_arr := abi.make(abi.DynamicArray[SourceSpec])).set(request_params.source_arr),
         (agg_method := abi.Uint32()).set(request_params.agg_method),
         (user_data := abi.make(abi.DynamicBytes)).set(request_params.user_data),
@@ -244,7 +263,7 @@ def send_request(
         (box_refs := abi.make(abi.DynamicArray[BoxType])).set([price_box]),
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.MethodCall(
-            app_id= GORA_CONTRACT_ID,
+            app_id= MAIN_APP_ID,
             method_signature=get_method_signature("request","main"),
             args=[
                 request_spec_packed,
@@ -261,7 +280,7 @@ def send_request(
     )
 
 # TODO: not sure we need this
-@PricePair.external(authorize=Authorize.only(PricePair.state.manager.get()))
+@app.external(authorize=Authorize.only(app.state.manager.get()))
 def opt_in_gora(
     asset_reference: abi.Asset,
     main_app_reference: abi.Application,
@@ -274,8 +293,8 @@ def opt_in_gora(
 
 if __name__ == "__main__":
     params = yaml.safe_load(sys.argv[1])
-    GORA_CONTRACT_ID = Int(params["GORA_CONTRACT_ID"])
-    GORA_CONTRACT_ADDRESS  = Bytes(algosdk.encoding.decode_address(algosdk.logic.get_application_address(params['GORA_CONTRACT_ID'])))
+    MAIN_APP_ID = Int(params["MAIN_APP_ID"])
+    MAIN_APP_ADDRESS = Bytes(algosdk.encoding.decode_address(algosdk.logic.get_application_address(params['MAIN_APP_ID'])))
     DEMO_MODE = params["DEMO_MODE"]
     output_dir = Path(__file__).parent / "artifacts"
-    app_spec = PricePair.build(beaker.sandbox.get_algod_client()).export(output_dir)
+    app_spec = app.build(beaker.sandbox.get_algod_client()).export(output_dir)
