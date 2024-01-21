@@ -16,16 +16,15 @@ from algosdk.atomic_transaction_composer import (
     AccountTransactionSigner,
 )
 
-
-from .GORA_ABI import GORACLE_ABI
 from algosdk.encoding import decode_address
+from assets.abi import ABI_PATH,system_delima
 from algosdk.logic import get_application_address
 from algosdk.abi.method import get_method_by_name,Method
 
 
 
 ALGOD_CLIENT =  BK.localnet.get_algod_client()
-
+GORACLE_ABI = json.load(open(ABI_PATH + f"{system_delima}main-contract.json"))
 
 
 def describe_gora_num(packed):

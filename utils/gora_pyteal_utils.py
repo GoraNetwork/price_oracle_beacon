@@ -5,17 +5,8 @@ import os
 from pyteal import *
 from .abi_types import *
 from .inline import InlineAssembly
-from price_oracle_beacon.assets.abi import ABI_PATH
+from assets.abi import ABI_PATH,system_delima
 
-# "/" for linux "\" for windows
-if "win" in str(sys.platform):
-    system_delima = "\\"
-else:
-    system_delima = "/"
-
-
-if "GORACLE_ABI_PATH" in os.environ:
-    ABI_PATH = os.environ["GORACLE_ABI_PATH"]
 
 
 main_contract_abi = json.load(open(ABI_PATH + f"{system_delima}main-contract.json"))

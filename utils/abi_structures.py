@@ -1,21 +1,34 @@
-import os
-import pathlib
-import sys
 from pyteal import *
-from algosdk import abi as sdk_abi
+from typing import Literal as L
 
-# sys.path.remove('/home/samfisher/Goracle/contracts/assets/price_pair')
-sys.path.append(os.path.join(pathlib.Path(__file__).parent.resolve().parent.resolve().parent.resolve()))
-from utils.abi_types import *
+REQUEST_METHOD_SPEC = "(byte[],byte[],uint64,byte[],uint64[],uint64[],address[],(byte[],uint64)[])void"
 
 class BoxType(abi.NamedTuple):
     key: abi.Field[abi.DynamicBytes]
     app_id: abi.Field[abi.Uint64]
+    
+class SourceSpec(abi.NamedTuple):
+    source_id: abi.Field[abi.Uint32]
+    source_arg_list: abi.Field[abi.DynamicArray[abi.DynamicBytes]]
+    max_age: abi.Field[abi.Uint32]
 
-class PricePairResponse(abi.NamedTuple):
-    name: abi.Field[abi.DynamicBytes]
-    price: abi.Field[abi.Uint64]
-    timestamp: abi.Field[abi.Uint64]
+class RequestSpec(abi.NamedTuple):
+    source_specs: abi.Field[abi.DynamicArray[SourceSpec]]
+    aggregation: abi.Field[abi.Uint32]
+    user_data: abi.Field[abi.DynamicBytes]
+
+class DestinationSpec(abi.NamedTuple):
+    app_id: abi.Field[abi.Uint64]
+    method: abi.Field[abi.DynamicBytes]
+
+class ResponseBody(abi.NamedTuple):
+    request_id: abi.Field[abi.StaticBytes[L[32]]]
+    requester_addr: abi.Field[abi.Address]
+    oracle_value: abi.Field[abi.DynamicBytes]
+    user_data: abi.Field[abi.DynamicBytes]
+    error_code: abi.Field[abi.Uint32]
+    source_errors: abi.Field[abi.Uint64]
+
 
 class RequestParams(abi.NamedTuple):
     price_pair_name: abi.Field[abi.DynamicBytes]
@@ -23,19 +36,3 @@ class RequestParams(abi.NamedTuple):
     source_arr: abi.Field[abi.DynamicArray[SourceSpec]]
     agg_method: abi.Field[abi.Uint32]
     user_data: abi.Field[abi.DynamicBytes]
-
-
-class OracleResponse(abi.NamedTuple):
-    response: abi.Field[abi.DynamicBytes]
-
-
-response_body_type = sdk_abi.TupleType([
-    sdk_abi.ABIType.from_string("byte[32]"), # request_id
-    sdk_abi.ABIType.from_string("address"), # requester_address
-    sdk_abi.ABIType.from_string("byte[]"), # oracle return value
-    sdk_abi.ABIType.from_string("byte[]"), # user data
-    sdk_abi.ABIType.from_string("uint32"), # error code
-    sdk_abi.ABIType.from_string("uint64") # source failure bitmap
-])
-
-response_body_bytes_type = sdk_abi.ArrayDynamicType(sdk_abi.ByteType())

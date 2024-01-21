@@ -1,13 +1,13 @@
 from pyteal import Seq,InnerTxnBuilder,TxnField,Assert,abi,TxnType,Global
 
-def send_algo(receiver, amount, fee_amount):
+def send_algo(receiver, amount):
     return Seq([
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
             TxnField.type_enum: TxnType.Payment,
             TxnField.receiver: receiver,
             TxnField.amount: amount,
-            TxnField.fee: fee_amount
+            # TxnField.fee: fee_amount
         }),
         InnerTxnBuilder.Submit()
     ])
