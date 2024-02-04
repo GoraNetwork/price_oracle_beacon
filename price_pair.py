@@ -92,7 +92,6 @@ def update_manager(
         PricePair.state.manager.set(new_manager.get())
     )
 
-
 @PricePair.external(authorize=Authorize.only(PricePair.state.manager.get()))
 def create_request_params_box(
     price_pair_name: abi.DynamicBytes,
@@ -135,7 +134,6 @@ def delete_request_params_box(
         ),
     )
 
-
 @PricePair.external(authorize=Authorize.only(PricePair.state.manager.get()))
 def opt_in_gora(
     asset_reference: abi.Asset,
@@ -164,6 +162,14 @@ def update_price(
         ),
         PricePair.state.oracle_response[price_pair_name.get()].set(oracle_return_value.get())
     )
+
+
+@PricePair.external()
+def get_pair_price(price_pair_name: abi.DynamicBytes, *, output: abi.DynamicBytes)-> Expr:
+    return output.set(PricePair.state.oracle_response[price_pair_name.get()].get())
+
+
+
 
 @PricePair.external()
 def send_request(

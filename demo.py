@@ -133,26 +133,46 @@ class OraclePrice():
 
         try:
             result = self.PRICE_CLIENT.call(
-                        "send_request",
-                        price_pair_name = price_pair_name,
-                        key = request_key,
-                        transaction_parameters=OnCompleteCallParameters(
-                            signer=requester.signer,
-                            sender=requester.address,
-                            suggested_params=ALGOD_CLIENT.suggested_params(),
-                            foreign_apps=[ GORA_CONTRACT_ID ],
-                            boxes=[
-                                (GORA_CONTRACT_ID, box_name),
-                                (GORA_CONTRACT_ID, price_pair_name),
-                                (self.CONTRACT_ID, b"req"+price_pair_name), ],
-                        ),
-                    )
+                "send_request",
+                price_pair_name = price_pair_name,
+                key = request_key,
+                transaction_parameters=OnCompleteCallParameters(
+                    signer=requester.signer,
+                    sender=requester.address,
+                    suggested_params=ALGOD_CLIENT.suggested_params(),
+                    foreign_apps=[ GORA_CONTRACT_ID ],
+                    boxes=[
+                        (GORA_CONTRACT_ID, box_name),
+                        (GORA_CONTRACT_ID, price_pair_name),
+                        (self.CONTRACT_ID, b"req"+price_pair_name), ],
+                ),
+            )
         
             print("Confirmed in round:", result.confirmed_round)
             print("Top txn ID:", result.tx_id)
             print("GORA PRICE DATA FETCHED")
         except Exception as e:
             print(f"Oracle couldn't process request because ::: {e}")
+    
+
+    def get_pair_price(self,requester:Account,price_pair_name:bytes):
+        """
+            THIS METHOD IS USED TO GET THE PAIR RESULT OF A TOKEN PAIR
+        """
+
+        result = self.PRICE_CLIENT.call(
+            "get_pair_price",
+            price_pair_name = price_pair_name,
+            transaction_parameters=OnCompleteCallParameters(
+                signer=requester.signer,
+                sender=requester.address,
+                boxes=[ (self.CONTRACT_ID,price_pair_name)],
+            ),
+        )
+
+        oracle_response = result.raw_value
+        oracle_price_result = describe_gora_num(oracle_response[2:])
+        print(f"ORACLE PRICE DATA FOR {str(price_pair_name).upper()} :: {oracle_price_result}")
 
 
     def run_demo(self):
@@ -204,13 +224,13 @@ class OraclePrice():
             sourceSpec=sourceArg
         )
 
-         # AFTER MAKING AN ORACLE REQUEST YOU HAVE TO WAIT FOR APPROXIMATELY 10secs 
+        # AFTER MAKING AN ORACLE REQUEST YOU HAVE TO WAIT FOR APPROXIMATELY 10secs 
         # FOR THE ORACLE TO WRITE THE RESPONSE TO THE BOX
         time.sleep(10)
-        oracle_response = self.ALGOD_CLIENT.application_box_by_name(self.CONTRACT_ID,price_pair)
-        response = base64.b64decode(oracle_response.get("value"))
-        oracle_price_result = describe_gora_num(response)
-        print(f"ORACLE PRICE DATA FOR {price_pair.upper()} :: {oracle_price_result}")
+        self.get_pair_price(
+            requester=self.requester,
+            price_pair_name=price_pair
+        )
         
 
         # PLACE/MAKE A REQUEST FOR THE PRICE PAIR YOU ARE LOOKING FOR
@@ -223,10 +243,19 @@ class OraclePrice():
         # AFTER MAKING AN ORACLE REQUEST YOU HAVE TO WAIT FOR APPROXIMATELY 10secs 
         # FOR THE ORACLE TO WRITE THE RESPONSE TO THE BOX
         time.sleep(10)
-        oracle_response = self.ALGOD_CLIENT.application_box_by_name(self.CONTRACT_ID,price_pair)
-        response = base64.b64decode(oracle_response.get("value"))
-        oracle_price_result = describe_gora_num(response)
-        print(f"ORACLE PRICE DATA FOR {price_pair.upper()} :: {oracle_price_result}")
+        self.get_pair_price(
+            requester=self.requester,
+            price_pair_name=price_pair
+        )
+
+
+        # AFTER MAKING AN ORACLE REQUEST YOU HAVE TO WAIT FOR APPROXIMATELY 10secs 
+        # FOR THE ORACLE TO WRITE THE RESPONSE TO THE BOX
+        # time.sleep(10)
+        # oracle_response = self.ALGOD_CLIENT.application_box_by_name(self.CONTRACT_ID,price_pair)
+        # response = base64.b64decode(oracle_response.get("value"))
+        # oracle_price_result = describe_gora_num(response)
+        # print(f"ORACLE PRICE DATA FOR {price_pair.upper()} :: {oracle_price_result}")
 
 
 
